@@ -4,9 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "server:install": "cd server && npm install",
     "server:build": "gulp server",
+    "cli:install": "cd cli && npm install",
     "cli:build": "gulp cli",
     "server": "node server/build/server.js",
+    "sync": "git pull && npm run server:install && npm run cli:install && npm install",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
