@@ -1,3 +1,8 @@
+# custom
+cli/build/configs
+server/db
+
+
 # Logs
 logs
 *.log

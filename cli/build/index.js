@@ -1,4 +1,7 @@
 var moment = require("moment");
+var rp = require("request-promise");
+var fs = require("fs");
+var path = require("path");
 /*
  *
  * @example
@@ -13,11 +16,39 @@ module.exports = /** @class */ (function () {
         this.placeRegex = /#(.*?)(?=\s|$)/;
         this.timeRegex = /@\((.*?)\-(.*?)\)(?=\s|$)/;
         this.timeRegexPlus = /@([^{<].+?)\+(.+?)(?=\s|$)/;
+        this.options = {};
+        try {
+            var configs = fs.readFileSync(path.join(__dirname, "configs"), "utf-8");
+            this.options = JSON.parse(configs);
+        }
+        catch (e) { }
+        ;
     }
     GTD.prototype.add = function (item) {
         if (item === void 0) { item = ""; }
         var parsedItem = this.parse(item);
-        console.log(JSON.stringify(parsedItem));
+        rp({
+            url: this.options.host ? (this.options.host.indexOf("http") > -1 ? this.options.host : "http://" + this.options.host) + ":" + (this.options.port || 80) : "http://localhost:1000",
+            method: "POST",
+            json: true,
+            body: parsedItem
+        }).then(function (data) {
+            console.log(data);
+        });
+    };
+    GTD.prototype.set = function (options) {
+        var _this = this;
+        if (options === void 0) { options = ""; }
+        options.split(" ").forEach(function (op) {
+            var _a = op.split("="), key = _a[0], value = _a[1];
+            if (typeof key !== "undefined" && typeof value !== "undefined") {
+                _this.options[key] = value;
+            }
+        });
+        fs.writeFileSync(path.join(__dirname, "configs"), JSON.stringify(this.options));
+    };
+    GTD.prototype.hasAction = function (action) {
+        return ["add", "set"].indexOf(action) > -1;
     };
     GTD.prototype.parse = function (item) {
         if (item === void 0) { item = ""; }

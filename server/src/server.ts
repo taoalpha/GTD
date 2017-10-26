@@ -14,6 +14,7 @@ app.get("/", (req, res) => {
 
 app.post("/", (req, res) => {
   console.log(req.body);
+  res.json({id: 1});
 });
  
 app.listen(2000);

@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "server:build": "gulp server",
+    "cli:build": "gulp cli",
     "server": "node server/build/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

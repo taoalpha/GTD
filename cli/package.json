@@ -8,19 +8,15 @@
     "doc": "doc"
   },
   "scripts": {
-    "start": "gulp",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "lowdb": "^1.0.0",
     "minimist": "^1.2.0",
-    "moment": "^2.19.1"
+    "moment": "^2.19.1",
+    "request-promise": "^4.2.2"
   },
-  "devDependencies": {
-    "gulp": "^3.9.1",
-    "gulp-typescript": "^3.2.3",
-    "require-dir": "^0.3.2",
-    "typescript": "^2.5.3"
-  }
+  "devDependencies": {}
 }

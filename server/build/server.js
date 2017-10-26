@@ -9,5 +9,6 @@ app.get("/", function (req, res) {
 });
 app.post("/", function (req, res) {
     console.log(req.body);
+    res.json({ id: 1 });
 });
 app.listen(2000);

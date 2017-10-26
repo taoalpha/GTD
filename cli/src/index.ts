@@ -1,11 +1,20 @@
 declare const module;
+declare const __dirname;
 declare const require;
 
-const moment = require("moment");
+// so to support Object.assign
+declare interface ObjectConstructor {
+  assign(target: any, ...sources: any[]): any;
+}
+
 interface LooseObject {
   [key: string]: any
 }
 
+const moment = require("moment");
+const rp = require("request-promise");
+const fs = require("fs");
+const path = require("path");
 
 /*
  *
@@ -20,12 +29,39 @@ module.exports = class GTD {
   private placeRegex = /#(.*?)(?=\s|$)/;
   private timeRegex = /@\((.*?)\-(.*?)\)(?=\s|$)/;
   private timeRegexPlus = /@([^{<].+?)\+(.+?)(?=\s|$)/;
+  private options : LooseObject = {};
   constructor() {
+    try {
+      let configs = fs.readFileSync(path.join(__dirname, "configs"), "utf-8");
+      this.options = JSON.parse(configs);
+    } catch (e) {};
   }
 
   add(item : String = "") {
     let parsedItem = this.parse(item);
-    console.log(JSON.stringify(parsedItem));
+    rp({
+      url: this.options.host ? `${this.options.host.indexOf("http") > -1 ? this.options.host : "http://" + this.options.host}:${this.options.port || 80}` : "http://localhost:1000",
+      method: "POST",
+      json: true,
+      body: parsedItem
+    }).then(data => {
+      console.log(data);
+    });
+  }
+
+  set(options : String = "") {
+    options.split(" ").forEach(op => {
+      let [key, value] = op.split("=");
+      if (typeof key !== "undefined" && typeof value !== "undefined") {
+        this.options[key] = value;
+      }
+    });
+
+    fs.writeFileSync(path.join(__dirname, "configs"), JSON.stringify(this.options));
+  }
+
+  hasAction(action) {
+    return ["add", "set"].indexOf(action) > -1;
   }
 
   parse(item : String = "") {
