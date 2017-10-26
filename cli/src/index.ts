@@ -67,7 +67,7 @@ module.exports = class GTD {
   parse(item : String = "") {
     // TODO: walk through char by char
     if (!item) return;
-    let parsedItem : LooseObject = {};
+    let parsedItem : LooseObject = { _item: item };
     
     // parse the body
     let title = item.match(this.titleRegex);

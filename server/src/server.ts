@@ -22,6 +22,19 @@ app.get("/", (req, res) => {
   res.send("Hello World!");
 });
 
+app.get("/todos", (req, res) => {
+  res.json(db.get("todos").value());
+});
+
+app.get("/todos/today", (req, res) => {
+  let todayTodos = db.get("todos")
+    .defaults({[moment().format("YYYY-MM-DD")]: []})
+    .get(moment().format("YYYY-MM-DD"))
+    .value();
+
+  res.json(todayTodos); 
+});
+
 app.post("/", (req, res) => {
   db.get("todos")
     .defaults({[moment().format("YYYY-MM-DD")]: []})
@@ -29,7 +42,7 @@ app.post("/", (req, res) => {
     .push(req.body)
     .write();
 
-  res.json({id: 1});
+  res.json({id: db.get("todos." + moment().format("YYYY-MM-DD")).value().length});
 });
  
 app.listen(2000);
