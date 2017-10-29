@@ -9,6 +9,25 @@ const FileSync = require("lowdb/adapters/FileSync");
 const adapter = new FileSync(path.resolve(__dirname, "../db/db.json"));
 const db = low(adapter);
 
+const sortTodo = (a, b) => a.created - b.created;
+
+const addItemToDB = (item, i, array) => {
+  let todos = db.get("todos");
+  let local_todos = todos.defaults({[moment(item.created).format("YYYY-MM-DD")]: []})
+    .get(moment(item.created).format("YYYY-MM-DD")).value();
+  
+    local_todos.push(item);
+
+  // sort
+  todos.set(moment(item.created).format("YYYY-MM-DD"),
+            local_todos.sort(sortTodo)).write();
+};
+
+const updateItemToDB = (item, i, array) => {
+  // fidn and update
+  db.get("todos").get(moment(item.created).format("YYYY-MM-DD")).find({_item: item._item}).assign(item).write();
+}
+
 db.defaults({ todos: {} })
   .write();
 
@@ -24,6 +43,15 @@ app.get("/", (req, res) => {
 
 app.get("/todos", (req, res) => {
   res.json(db.get("todos").value());
+});
+
+app.patch("/todos", (req, res) => {
+  let addItems = req.body.add;
+  let updateItems = req.body.update;
+
+  if (addItems) addItems.forEach(addItemToDB);
+  if (updateItems) updateItems.forEach(updateItemToDB);
+  res.json({add: addItems && addItems.length, updated: updateItems && updateItems.length});
 });
 
 // fetch todos for a specific day

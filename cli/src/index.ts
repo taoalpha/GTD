@@ -50,7 +50,7 @@ module.exports = class GTD {
   private apiUrl;
   private MAX_RETRY = 3;
   private retry = 0;
-  private cache_current_data_set;
+  private syncing;
 
   constructor() {
     try {
@@ -59,7 +59,7 @@ module.exports = class GTD {
     } catch (e) {};
 
     this._updateConfig();
-    this._sync;
+    this._sync();
   }
 
   _updateConfig() {
@@ -70,22 +70,130 @@ module.exports = class GTD {
    * sync local with server asynchronously
    */
   _sync() {
-    // TODO: merge sync (honor both local and server, but for same content, override depends on the updated time)
+    let last_sync_time = db.get("last_sync_time").value();
+
+    // sync every certain time
+    if (last_sync_time && Math.abs(moment(last_sync_time).diff(moment(), "seconds", true)) < 10) return;
+    db.set("last_sync_time", moment()).write();
+    this.syncing = true;
+    console.info(chalk.yellow("Syncing..."));
+    if (this.options.host) {
+      rp({
+        url: this.apiUrl + "/todos",
+        method: "GET",
+        json: true
+      }).then(todos => {
+          let local_todos = db.get("todos");
+          let merged_todos : LooseObject = {};
+          let server_update_items : LooseObject = {};
+          Object.keys(todos).forEach(dateStr => {
+            server_update_items[dateStr] = [];
+            merged_todos[dateStr] = this._mergeTodos(todos[dateStr], local_todos.defaults(dateStr, []).get(dateStr).value(), server_update_items[dateStr]);
+          });
+
+          this._syncLocal(merged_todos);
+          this._syncServer(server_update_items);
+        });
+    } else {
+      console.warn("No valid host set!");
+    }
   }
 
-  add(item : String = "") {
-    let parsedItem = this._parse(item);
+  _mergeTodos(server = [], local = [], server_to_update = []) {
+    let merged = server.map(server_todo => {
+      let local_todo;
+      for (let i = 0; i < local.length; i++) {
+        if (local[i]._item == server_todo._item) {
+          local_todo = local[i];
+
+          // mark as handled
+          local[i] = false;
+        }
+      }
+      if (local_todo) {
+        // determine whether to update or not
+        if (moment(local_todo.updated).isAfter(moment(server_todo.updated))) {
+          server_to_update.push({
+            action: "update",
+            entry: local_todo
+          });
+          return local_todo;
+        }
+        return server_todo;
+      } else {
+        return server_todo;
+      }
+    });
+
+    // for those items that hasn't been touched yet
+    local.forEach(local_todo => {
+      if (local_todo) {
+        // server doesn't have it
+        merged.push(local_todo);
+        server_to_update.push({
+          action: "add",
+          entry: local_todo
+        });
+      }
+    });
+
+    // return as a sorted order
+    return merged.sort(this._sortTodo);
+  }
+
+  /**
+   * sync server items to local
+   * @param todos 
+   */
+  _syncLocal(todos) {
+    db.set("todos", todos).write();
+    this.syncing = false;
+  }
+
+  /**
+   * sync local items to server if needed
+   * @param todos 
+   */
+  _syncServer(todos) {
+    let batched : LooseObject = {};
+    let count = 0;
+    Object.keys(todos).forEach(dateStr => {
+      todos[dateStr].forEach(todo => {
+        batched[todo.action] = batched[todo.action] || [];
+        batched[todo.action].push(todo.entry);
+        count++;
+      });
+    });
+
+    if (count && this.options.host) {
+      rp({
+        url: this.apiUrl + "/todos",
+        method: "PATCH",
+        json: true,
+        body: batched
+      }).then(data => {
+        console.info(chalk.yellow("Sync finished!"));
+        console.info(JSON.stringify(data, null, 2));
+      });
+    } else {
+      console.info(chalk.yellow("Sync finished!"));
+    }
+  }
+
+    add(item : String = "") {
+      let parsedItem = this._parse(item);
 
     // TODO: store locally and sync after host available
-    db.get("todos")
-      .defaults({ [moment(parsedItem.created).format("YYYY-MM-DD")]: [] })
-      .get(moment(parsedItem.created).format("YYYY-MM-DD"))
-      .push(parsedItem)
-      .write();
+    let todos_db = db.get("todos")
+      .defaults({ [moment(parsedItem.created).format("YYYY-MM-DD")]: [] });
+
+    let todos = todos_db.get(moment(parsedItem.created).format("YYYY-MM-DD")).value();
+    todos.push(parsedItem);
+
+    // store sorted items
+    todos_db.set(moment(parsedItem.created).format("YYYY-MM-DD"), todos.sort(this._sortTodo)).write();
 
     // if set host, sync with server side
-    // TODO: a better way to sync (maybe sync file directly) ?
-    // TODO: sync existing too
     if (this.options.host) {
       rp({
         url: this.apiUrl,
@@ -96,6 +204,10 @@ module.exports = class GTD {
         this._printTodos([data]);
       });
     }
+  }
+
+  _sortTodo(a, b) {
+    return a.created - b.created;
   }
 
   /**
@@ -126,6 +238,7 @@ module.exports = class GTD {
    * @param date 
    */
   show(date = moment()) {
+    if (this.syncing) return setTimeout(this.show.bind(this), 200);
     date = moment(date);
     let dateStr = moment(date).format("YYYY-MM-DD");
     this._printTodos(db.get("todos")
@@ -152,9 +265,9 @@ module.exports = class GTD {
 
       // unlikely happen, but just for safety
       if (!item) return;
-      item = `    ${i + 1}. [ ${todo.status === "done" ? "x" : ""} ] ${item.replace(this.placeRegex, match => chalk.yellow(match))
+      item = chalk.green(`    ${i + 1}. [ ${todo.status === "done" ? "x" : ""} ] ${item.replace(this.placeRegex, match => chalk.yellow(match))
                   .replace(this.timeRegex, match => chalk.cyan(match))
-                  .replace(this.timeRegexPlus, match => chalk.cyan(match))}`;
+                  .replace(this.timeRegexPlus, match => chalk.cyan(match))}`);
 
       // add a strikehtrough for done item
       if (todo.status === "done") item = chalk.strikethrough(item);

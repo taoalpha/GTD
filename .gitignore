@@ -1,6 +1,6 @@
 # custom
 cli/build/configs
-server/db/*.json
+db.json
 
 
 # Logs
