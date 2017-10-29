@@ -23,6 +23,16 @@ const fs = require("fs");
 const path = require("path");
 const chalk = require("chalk");
 
+// for local storage
+const low = require("lowdb");
+const FileSync = require("lowdb/adapters/FileSync");
+const adapter = new FileSync(path.resolve(__dirname, "../db/db.json"));
+const db = low(adapter);
+
+db.defaults({ todos: {} })
+  .write();
+
+
 /*
  *
  * @example
@@ -40,6 +50,7 @@ module.exports = class GTD {
   private apiUrl;
   private MAX_RETRY = 3;
   private retry = 0;
+  private cache_current_data_set;
 
   constructor() {
     try {
@@ -48,26 +59,43 @@ module.exports = class GTD {
     } catch (e) {};
 
     this._updateConfig();
+    this._sync;
   }
 
   _updateConfig() {
     this.apiUrl = `${this.options.host.slice(0, 4) === "http" ? this.options.host : "http://" + this.options.host}:${this.options.port || 80}`;
   }
 
+  /**
+   * sync local with server asynchronously
+   */
+  _sync() {
+    // TODO: merge sync (honor both local and server, but for same content, override depends on the updated time)
+  }
+
   add(item : String = "") {
     let parsedItem = this._parse(item);
 
     // TODO: store locally and sync after host available
-    if (!this.options.host) throw new Error("No Available Host!");
+    db.get("todos")
+      .defaults({ [moment(parsedItem.created).format("YYYY-MM-DD")]: [] })
+      .get(moment(parsedItem.created).format("YYYY-MM-DD"))
+      .push(parsedItem)
+      .write();
 
-    rp({
-      url: this.apiUrl,
-      method: "POST",
-      json: true,
-      body: parsedItem
-    }).then(data => {
-      console.log(data);
-    });
+    // if set host, sync with server side
+    // TODO: a better way to sync (maybe sync file directly) ?
+    // TODO: sync existing too
+    if (this.options.host) {
+      rp({
+        url: this.apiUrl,
+        method: "POST",
+        json: true,
+        body: parsedItem
+      }).then(data => {
+        this._printTodos([data]);
+      });
+    }
   }
 
   /**
@@ -100,16 +128,10 @@ module.exports = class GTD {
   show(date = moment()) {
     date = moment(date);
     let dateStr = moment(date).format("YYYY-MM-DD");
-
-    rp({
-      url: `${this.apiUrl}/todos/${dateStr}`,
-      method: "GET",
-      json: true,
-    }).then(data => {
-      if (!data.length && this.retry++ < this.MAX_RETRY) this.show(date.add(1, "d"));
-      this._printTodos(data);
-    });
-
+    this._printTodos(db.get("todos")
+        .defaults({[dateStr]: []})
+        .get(dateStr)
+        .value());
   }
 
   /**
@@ -124,11 +146,13 @@ module.exports = class GTD {
    * print todos
    * @param todos 
    */
-  _printTodos(todos: any[]) {
+  _printTodos(todos: any[] = []) {
     let todosPretty = todos.map((todo, i) => {
       let item = todo._item;
+
+      // unlikely happen, but just for safety
       if (!item) return;
-      item = `\t ${i + 1}. [ ${todo.status === "done" ? "x" : ""} ] ${item.replace(this.placeRegex, match => chalk.yellow(match))
+      item = `    ${i + 1}. [ ${todo.status === "done" ? "x" : ""} ] ${item.replace(this.placeRegex, match => chalk.yellow(match))
                   .replace(this.timeRegex, match => chalk.cyan(match))
                   .replace(this.timeRegexPlus, match => chalk.cyan(match))}`;
 
@@ -147,12 +171,12 @@ module.exports = class GTD {
   _parse(item : String = "") {
     // TODO: walk through char by char
     if (!item) return;
-    item = item.replace(this.placeRegex, "").replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ");
+    item = item.replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ");
     let parsedItem : LooseObject = { _item: item, status: Status.ongoing};
     
     // parse the body
     // remove the time, place, heading or trailing spaces, multiple spaces into one space
-    parsedItem.title = item.replace(this.timeRegex, "").replace(this.timeRegexPlus, "");
+    parsedItem.title = item.replace(this.timeRegex, "").replace(this.timeRegexPlus, "").replace(this.placeRegex, "");
 
     // parse time
     Object.assign(parsedItem, this._parseTime(item));

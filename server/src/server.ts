@@ -44,7 +44,7 @@ app.post("/", (req, res) => {
     .push(req.body)
     .write();
 
-  res.json({id: db.get("todos." + moment(req.body.created).format("YYYY-MM-DD")).value().length});
+  res.json(Object.assign({id: db.get("todos." + moment(req.body.created).format("YYYY-MM-DD")).value().length}, req.body));
 });
  
 app.listen(2000);
