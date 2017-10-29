@@ -1,7 +1,14 @@
+var Status;
+(function (Status) {
+    Status["ongoing"] = "ongoing";
+    Status["fail"] = "fail";
+    Status["done"] = "done";
+})(Status || (Status = {}));
 var moment = require("moment");
 var rp = require("request-promise");
 var fs = require("fs");
 var path = require("path");
+var chalk = require("chalk");
 /*
  *
  * @example
@@ -12,11 +19,12 @@ var path = require("path");
  */
 module.exports = /** @class */ (function () {
     function GTD() {
-        this.titleRegex = /^(.*?)[@|#]/;
         this.placeRegex = /#(?:\((.*?)\)(?=\s|$)|(.+?)(?=\s|$))/;
         this.timeRegex = /@\((.*?)\-(.*?)\)(?=\s|$)/;
         this.timeRegexPlus = /@([^{<].+?)\+(.+?)(?=\s|$)/;
         this.options = {};
+        this.MAX_RETRY = 3;
+        this.retry = 0;
         try {
             var configs = fs.readFileSync(path.join(__dirname, "configs"), "utf-8");
             this.options = JSON.parse(configs);
@@ -34,15 +42,14 @@ module.exports = /** @class */ (function () {
         // TODO: store locally and sync after host available
         if (!this.options.host)
             throw new Error("No Available Host!");
-        console.log(parsedItem);
-        // rp({
-        //   url: this.apiUrl,
-        //   method: "POST",
-        //   json: true,
-        //   body: parsedItem
-        // }).then(data => {
-        //   console.log(data);
-        // });
+        rp({
+            url: this.apiUrl,
+            method: "POST",
+            json: true,
+            body: parsedItem
+        }).then(function (data) {
+            console.log(data);
+        });
     };
     /**
      * set host / port that todos will be sent to
@@ -69,26 +76,59 @@ module.exports = /** @class */ (function () {
      * @param date
      */
     GTD.prototype.show = function (date) {
+        var _this = this;
         if (date === void 0) { date = moment(); }
-        date = moment(date).format("YYYY-MM-DD");
+        date = moment(date);
+        var dateStr = moment(date).format("YYYY-MM-DD");
         rp({
-            url: this.apiUrl + "/todos/" + date,
+            url: this.apiUrl + "/todos/" + dateStr,
             method: "GET",
             json: true
         }).then(function (data) {
-            console.log(data);
+            if (!data.length && _this.retry++ < _this.MAX_RETRY)
+                _this.show(date.add(1, "d"));
+            _this._printTodos(data);
         });
+    };
+    /**
+     * mark an item as done
+     * @param item
+     */
+    GTD.prototype.done = function (item) {
+    };
+    /**
+     * print todos
+     * @param todos
+     */
+    GTD.prototype._printTodos = function (todos) {
+        var _this = this;
+        var todosPretty = todos.map(function (todo, i) {
+            var item = todo._item;
+            if (!item)
+                return;
+            item = "\t " + (i + 1) + ". [ " + (todo.status === "done" ? "x" : "") + " ] " + item.replace(_this.placeRegex, function (match) { return chalk.yellow(match); })
+                .replace(_this.timeRegex, function (match) { return chalk.cyan(match); })
+                .replace(_this.timeRegexPlus, function (match) { return chalk.cyan(match); });
+            // add a strikehtrough for done item
+            if (todo.status === "done")
+                item = chalk.strikethrough(item);
+            // red bg for failed item
+            if (todo.status === "fail")
+                item = chalk.bgRed.italic(item);
+            return "" + item;
+        });
+        console.log(todosPretty.join("\n"));
     };
     GTD.prototype._parse = function (item) {
         if (item === void 0) { item = ""; }
         // TODO: walk through char by char
         if (!item)
             return;
-        var parsedItem = { _item: item };
+        item = item.replace(this.placeRegex, "").replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ");
+        var parsedItem = { _item: item, status: Status.ongoing };
         // parse the body
-        var title = item.match(this.titleRegex);
-        if (title)
-            parsedItem.title = title[1].trim();
+        // remove the time, place, heading or trailing spaces, multiple spaces into one space
+        parsedItem.title = item.replace(this.timeRegex, "").replace(this.timeRegexPlus, "");
         // parse time
         Object.assign(parsedItem, this._parseTime(item));
         // parse place

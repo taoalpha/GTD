@@ -7,6 +7,12 @@ declare interface ObjectConstructor {
   assign(target: any, ...sources: any[]): any;
 }
 
+enum Status{
+  ongoing = "ongoing",
+  fail = "fail",
+  done = "done"
+}
+
 interface LooseObject {
   [key: string]: any
 }
@@ -15,6 +21,7 @@ const moment = require("moment");
 const rp = require("request-promise");
 const fs = require("fs");
 const path = require("path");
+const chalk = require("chalk");
 
 /*
  *
@@ -25,13 +32,14 @@ const path = require("path");
  *
  */
 module.exports = class GTD {
-  private titleRegex = /^(.*?)[@|#]/;
   private placeRegex = /#(?:\((.*?)\)(?=\s|$)|(.+?)(?=\s|$))/;
   private timeRegex = /@\((.*?)\-(.*?)\)(?=\s|$)/;
   private timeRegexPlus = /@([^{<].+?)\+(.+?)(?=\s|$)/;
   private options : LooseObject = {};
 
   private apiUrl;
+  private MAX_RETRY = 3;
+  private retry = 0;
 
   constructor() {
     try {
@@ -51,17 +59,15 @@ module.exports = class GTD {
 
     // TODO: store locally and sync after host available
     if (!this.options.host) throw new Error("No Available Host!");
-    
-    console.log(parsedItem);
 
-    // rp({
-    //   url: this.apiUrl,
-    //   method: "POST",
-    //   json: true,
-    //   body: parsedItem
-    // }).then(data => {
-    //   console.log(data);
-    // });
+    rp({
+      url: this.apiUrl,
+      method: "POST",
+      json: true,
+      body: parsedItem
+    }).then(data => {
+      console.log(data);
+    });
   }
 
   /**
@@ -92,26 +98,61 @@ module.exports = class GTD {
    * @param date 
    */
   show(date = moment()) {
-    date = moment(date).format("YYYY-MM-DD");
+    date = moment(date);
+    let dateStr = moment(date).format("YYYY-MM-DD");
 
     rp({
-      url: `${this.apiUrl}/todos/${date}`,
+      url: `${this.apiUrl}/todos/${dateStr}`,
       method: "GET",
       json: true,
     }).then(data => {
-      console.log(data);
+      if (!data.length && this.retry++ < this.MAX_RETRY) this.show(date.add(1, "d"));
+      this._printTodos(data);
     });
 
+  }
+
+  /**
+   * mark an item as done
+   * @param item 
+   */
+  done(item) {
+
+  }
+
+  /**
+   * print todos
+   * @param todos 
+   */
+  _printTodos(todos: any[]) {
+    let todosPretty = todos.map((todo, i) => {
+      let item = todo._item;
+      if (!item) return;
+      item = `\t ${i + 1}. [ ${todo.status === "done" ? "x" : ""} ] ${item.replace(this.placeRegex, match => chalk.yellow(match))
+                  .replace(this.timeRegex, match => chalk.cyan(match))
+                  .replace(this.timeRegexPlus, match => chalk.cyan(match))}`;
+
+      // add a strikehtrough for done item
+      if (todo.status === "done") item = chalk.strikethrough(item);
+
+      // red bg for failed item
+      if (todo.status === "fail") item = chalk.bgRed.italic(item);
+
+      return `${item}`;
+    });
+
+    console.log(todosPretty.join("\n"));
   }
 
   _parse(item : String = "") {
     // TODO: walk through char by char
     if (!item) return;
-    let parsedItem : LooseObject = { _item: item };
+    item = item.replace(this.placeRegex, "").replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ");
+    let parsedItem : LooseObject = { _item: item, status: Status.ongoing};
     
     // parse the body
-    let title = item.match(this.titleRegex);
-    if (title) parsedItem.title = title[1].trim();
+    // remove the time, place, heading or trailing spaces, multiple spaces into one space
+    parsedItem.title = item.replace(this.timeRegex, "").replace(this.timeRegexPlus, "");
 
     // parse time
     Object.assign(parsedItem, this._parseTime(item));

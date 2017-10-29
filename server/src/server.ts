@@ -28,7 +28,7 @@ app.get("/todos", (req, res) => {
 
 // fetch todos for a specific day
 app.get("/todos/:date", (req, res) => {
-  let date = req.params.data;
+  let date = req.params.date;
   let todos = db.get("todos")
     .defaults({[date]: []})
     .get(date)
