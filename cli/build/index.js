@@ -13,7 +13,7 @@ var path = require("path");
 module.exports = /** @class */ (function () {
     function GTD() {
         this.titleRegex = /^(.*?)[@|#]/;
-        this.placeRegex = /#(.*?)(?=\s|$)/;
+        this.placeRegex = /#(?:\((.*?)\)(?=\s|$)|(.+?)(?=\s|$))/;
         this.timeRegex = /@\((.*?)\-(.*?)\)(?=\s|$)/;
         this.timeRegexPlus = /@([^{<].+?)\+(.+?)(?=\s|$)/;
         this.options = {};
@@ -23,19 +23,31 @@ module.exports = /** @class */ (function () {
         }
         catch (e) { }
         ;
+        this._updateConfig();
     }
+    GTD.prototype._updateConfig = function () {
+        this.apiUrl = (this.options.host.slice(0, 4) === "http" ? this.options.host : "http://" + this.options.host) + ":" + (this.options.port || 80);
+    };
     GTD.prototype.add = function (item) {
         if (item === void 0) { item = ""; }
-        var parsedItem = this.parse(item);
-        rp({
-            url: this.options.host ? (this.options.host.indexOf("http") > -1 ? this.options.host : "http://" + this.options.host) + ":" + (this.options.port || 80) : "http://localhost:1000",
-            method: "POST",
-            json: true,
-            body: parsedItem
-        }).then(function (data) {
-            console.log(data);
-        });
+        var parsedItem = this._parse(item);
+        // TODO: store locally and sync after host available
+        if (!this.options.host)
+            throw new Error("No Available Host!");
+        console.log(parsedItem);
+        // rp({
+        //   url: this.apiUrl,
+        //   method: "POST",
+        //   json: true,
+        //   body: parsedItem
+        // }).then(data => {
+        //   console.log(data);
+        // });
     };
+    /**
+     * set host / port that todos will be sent to
+     * @param options
+     */
     GTD.prototype.set = function (options) {
         var _this = this;
         if (options === void 0) { options = ""; }
@@ -46,16 +58,33 @@ module.exports = /** @class */ (function () {
             }
         });
         fs.writeFileSync(path.join(__dirname, "configs"), JSON.stringify(this.options));
+        this._updateConfig();
     };
+    // support actions
     GTD.prototype.hasAction = function (action) {
-        return ["add", "set"].indexOf(action) > -1;
+        return Object.keys(GTD.prototype).filter(function (v) { return v[0] !== "_"; }).indexOf(action) > -1;
     };
-    GTD.prototype.parse = function (item) {
+    /**
+     * show todos for someday
+     * @param date
+     */
+    GTD.prototype.show = function (date) {
+        if (date === void 0) { date = moment(); }
+        date = moment(date).format("YYYY-MM-DD");
+        rp({
+            url: this.apiUrl + "/todos/" + date,
+            method: "GET",
+            json: true
+        }).then(function (data) {
+            console.log(data);
+        });
+    };
+    GTD.prototype._parse = function (item) {
         if (item === void 0) { item = ""; }
         // TODO: walk through char by char
         if (!item)
             return;
-        var parsedItem = {};
+        var parsedItem = { _item: item };
         // parse the body
         var title = item.match(this.titleRegex);
         if (title)
@@ -67,8 +96,11 @@ module.exports = /** @class */ (function () {
         return parsedItem;
     };
     GTD.prototype._parseTime = function (item) {
+        var now = moment();
         var time = item.match(this.timeRegex);
         var parsedItem = {};
+        parsedItem.created = now;
+        parsedItem.updated = now;
         moment.relativeTimeRounding(function (value) { return +value.toFixed(2); }); // no rounding at all
         if (time) {
             parsedItem.begin = moment(time[1].trim(), "HH:mm A");
@@ -89,12 +121,18 @@ module.exports = /** @class */ (function () {
         if (parsedItem.duration) {
             parsedItem.durationPretty = parsedItem.duration.humanize();
         }
+        // if begin is ahead of now, default to tomorrow
+        // TODO: should support @<which day>
+        if (parsedItem.begin && parsedItem.begin.isBefore(now)) {
+            parsedItem.begin = parsedItem.begin.add(1, "d");
+            parsedItem.end = parsedItem.end.add(1, "d");
+        }
         return parsedItem;
     };
     GTD.prototype._parsePlace = function (item) {
         var place = item.match(this.placeRegex);
         if (place)
-            return { place: place[1].replace(/^\(|\)$/g, "").trim() }; // remove `()`
+            return { place: (place[1] || place[2]).trim() };
         return {};
     };
     return GTD;

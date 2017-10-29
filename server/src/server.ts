@@ -26,23 +26,25 @@ app.get("/todos", (req, res) => {
   res.json(db.get("todos").value());
 });
 
-app.get("/todos/today", (req, res) => {
-  let todayTodos = db.get("todos")
-    .defaults({[moment().format("YYYY-MM-DD")]: []})
-    .get(moment().format("YYYY-MM-DD"))
+// fetch todos for a specific day
+app.get("/todos/:date", (req, res) => {
+  let date = req.params.data;
+  let todos = db.get("todos")
+    .defaults({[date]: []})
+    .get(date)
     .value();
 
-  res.json(todayTodos); 
+  res.json(todos); 
 });
 
 app.post("/", (req, res) => {
   db.get("todos")
-    .defaults({[moment().format("YYYY-MM-DD")]: []})
-    .get(moment().format("YYYY-MM-DD"))
+    .defaults({[moment(req.body.created).format("YYYY-MM-DD")]: []})
+    .get(moment(req.body.created).format("YYYY-MM-DD"))
     .push(req.body)
     .write();
 
-  res.json({id: db.get("todos." + moment().format("YYYY-MM-DD")).value().length});
+  res.json({id: db.get("todos." + moment(req.body.created).format("YYYY-MM-DD")).value().length});
 });
  
 app.listen(2000);
