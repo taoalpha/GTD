@@ -1,9 +1,10 @@
-var Status;
-(function (Status) {
-    Status["ongoing"] = "ongoing";
-    Status["fail"] = "fail";
-    Status["done"] = "done";
-})(Status || (Status = {}));
+var STATUS;
+(function (STATUS) {
+    STATUS["ongoing"] = "ongoing";
+    STATUS["fail"] = "fail";
+    STATUS["done"] = "done";
+    STATUS["deleted"] = "deleted";
+})(STATUS || (STATUS = {}));
 var moment = require("moment");
 var rp = require("request-promise");
 var fs = require("fs");
@@ -32,6 +33,7 @@ module.exports = /** @class */ (function () {
         this.options = {};
         this.MAX_RETRY = 3;
         this.retry = 0;
+        this.sync_idle_time = 10 * 60;
         try {
             var configs = fs.readFileSync(path.join(__dirname, "configs"), "utf-8");
             this.options = JSON.parse(configs);
@@ -39,6 +41,7 @@ module.exports = /** @class */ (function () {
         catch (e) { }
         ;
         this._updateConfig();
+        // TODO: put sync to background process with `forever`
         this._sync();
     }
     GTD.prototype._updateConfig = function () {
@@ -51,7 +54,7 @@ module.exports = /** @class */ (function () {
         var _this = this;
         var last_sync_time = db.get("last_sync_time").value();
         // sync every certain time
-        if (last_sync_time && Math.abs(moment(last_sync_time).diff(moment(), "seconds", true)) < 10)
+        if (last_sync_time && Math.abs(moment(last_sync_time).diff(moment(), "seconds", true)) < this.sync_idle_time)
             return;
         db.set("last_sync_time", moment()).write();
         this.syncing = true;
@@ -157,16 +160,14 @@ module.exports = /** @class */ (function () {
         }
     };
     GTD.prototype.add = function (item) {
-        var _this = this;
         if (item === void 0) { item = ""; }
         var parsedItem = this._parse(item);
-        // TODO: store locally and sync after host available
         var todos_db = db.get("todos")
-            .defaults((_a = {}, _a[moment(parsedItem.created).format("YYYY-MM-DD")] = [], _a));
-        var todos = todos_db.get(moment(parsedItem.created).format("YYYY-MM-DD")).value();
+            .defaults((_a = {}, _a[moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD")] = [], _a));
+        var todos = todos_db.get(moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD")).value();
         todos.push(parsedItem);
         // store sorted items
-        todos_db.set(moment(parsedItem.created).format("YYYY-MM-DD"), todos.sort(this._sortTodo)).write();
+        todos_db.set(moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD"), todos.sort(this._sortTodo)).write();
         // if set host, sync with server side
         if (this.options.host) {
             rp({
@@ -175,10 +176,12 @@ module.exports = /** @class */ (function () {
                 json: true,
                 body: parsedItem
             }).then(function (data) {
-                _this._printTodos([data]);
+                // this._printTodos([data]);
             });
         }
         var _a;
+        // show current list of todo ?
+        // this.show();
     };
     GTD.prototype._sortTodo = function (a, b) {
         return a.created - b.created;
@@ -210,20 +213,54 @@ module.exports = /** @class */ (function () {
     GTD.prototype.show = function (date) {
         if (date === void 0) { date = moment(); }
         if (this.syncing)
-            return setTimeout(this.show.bind(this), 200);
+            return setTimeout(this.show.bind(this, date), 200);
+        var todos = this._fetch(date);
+        if (todos.length)
+            this._printTodos(todos);
+        else
+            console.info(chalk.yellow("No Todos Found!"));
+    };
+    GTD.prototype._fetch = function (date) {
+        if (date === void 0) { date = moment(); }
         date = moment(date);
         var dateStr = moment(date).format("YYYY-MM-DD");
-        this._printTodos(db.get("todos")
+        var todos = db.get("todos")
             .defaults((_a = {}, _a[dateStr] = [], _a))
             .get(dateStr)
-            .value());
+            .filter(function (item) { return item.status != STATUS.deleted; })
+            .value();
+        if (!todos.length && this.retry++ < this.MAX_RETRY)
+            return this._fetch(date.add(1, "d"));
+        return todos;
         var _a;
     };
     /**
      * mark an item as done
      * @param item
      */
-    GTD.prototype.done = function (item) {
+    GTD.prototype.done = function (idx, date) {
+        this._update(idx, STATUS.done, date);
+    };
+    GTD.prototype.fail = function (idx, date) {
+        this._update(idx, STATUS.fail, date);
+    };
+    GTD.prototype.undo = function (idx, date) {
+        this._update(idx, STATUS.ongoing, date);
+    };
+    GTD.prototype.remove = function (idx, date) {
+        this._update(idx, STATUS.deleted, date);
+    };
+    GTD.prototype._update = function (idx, status, date) {
+        if (date === void 0) { date = moment(); }
+        var todos = this._fetch(date);
+        if (todos[idx - 1]) {
+            db.get("todos").get(moment(date).format("YYYY-MM-DD")).find({ _item: todos[idx - 1]._item }).assign({ status: status, updated: moment() }).write();
+        }
+        else {
+            console.warn(chalk.yellow("Idx out of range!"));
+        }
+        // show updated items
+        this.show(date);
     };
     /**
      * print todos
@@ -237,16 +274,16 @@ module.exports = /** @class */ (function () {
             // unlikely happen, but just for safety
             if (!item)
                 return;
-            item = chalk.green("    " + (i + 1) + ". [ " + (todo.status === "done" ? "x" : "") + " ] " + item.replace(_this.placeRegex, function (match) { return chalk.yellow(match); })
+            item = "[ " + (todo.status === STATUS.done ? "x" : todo.status === STATUS.fail ? "-" : " ") + " ] " + item.replace(_this.placeRegex, function (match) { return chalk.yellow(match); })
                 .replace(_this.timeRegex, function (match) { return chalk.cyan(match); })
-                .replace(_this.timeRegexPlus, function (match) { return chalk.cyan(match); }));
+                .replace(_this.timeRegexPlus, function (match) { return chalk.cyan(match); });
             // add a strikehtrough for done item
-            if (todo.status === "done")
-                item = chalk.strikethrough(item);
+            if (todo.status === STATUS.done)
+                item = chalk.strikethrough.dim(item);
             // red bg for failed item
-            if (todo.status === "fail")
-                item = chalk.bgRed.italic(item);
-            return "" + item;
+            if (todo.status === STATUS.fail)
+                item = chalk.bold.italic(item);
+            return "    " + chalk.green(i + 1 + ". " + item);
         });
         console.log(todosPretty.join("\n"));
     };
@@ -256,7 +293,7 @@ module.exports = /** @class */ (function () {
         if (!item)
             return;
         item = item.replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ");
-        var parsedItem = { _item: item, status: Status.ongoing };
+        var parsedItem = { _item: item, status: STATUS.ongoing };
         // parse the body
         // remove the time, place, heading or trailing spaces, multiple spaces into one space
         parsedItem.title = item.replace(this.timeRegex, "").replace(this.timeRegexPlus, "").replace(this.placeRegex, "");

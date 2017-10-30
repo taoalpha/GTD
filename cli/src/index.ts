@@ -7,10 +7,11 @@ declare interface ObjectConstructor {
   assign(target: any, ...sources: any[]): any;
 }
 
-enum Status{
+enum STATUS {
   ongoing = "ongoing",
   fail = "fail",
-  done = "done"
+  done = "done",
+  deleted = "deleted"
 }
 
 interface LooseObject {
@@ -51,6 +52,7 @@ module.exports = class GTD {
   private MAX_RETRY = 3;
   private retry = 0;
   private syncing;
+  private sync_idle_time = 10 * 60;
 
   constructor() {
     try {
@@ -59,6 +61,8 @@ module.exports = class GTD {
     } catch (e) {};
 
     this._updateConfig();
+
+    // TODO: put sync to background process with `forever`
     this._sync();
   }
 
@@ -73,7 +77,7 @@ module.exports = class GTD {
     let last_sync_time = db.get("last_sync_time").value();
 
     // sync every certain time
-    if (last_sync_time && Math.abs(moment(last_sync_time).diff(moment(), "seconds", true)) < 10) return;
+    if (last_sync_time && Math.abs(moment(last_sync_time).diff(moment(), "seconds", true)) < this.sync_idle_time) return;
     db.set("last_sync_time", moment()).write();
     this.syncing = true;
     console.info(chalk.yellow("Syncing..."));
@@ -180,18 +184,17 @@ module.exports = class GTD {
     }
   }
 
-    add(item : String = "") {
-      let parsedItem = this._parse(item);
+  add(item: String = "") {
+    let parsedItem = this._parse(item);
 
-    // TODO: store locally and sync after host available
     let todos_db = db.get("todos")
-      .defaults({ [moment(parsedItem.created).format("YYYY-MM-DD")]: [] });
+      .defaults({ [moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD")]: [] });
 
-    let todos = todos_db.get(moment(parsedItem.created).format("YYYY-MM-DD")).value();
+    let todos = todos_db.get(moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD")).value();
     todos.push(parsedItem);
 
     // store sorted items
-    todos_db.set(moment(parsedItem.created).format("YYYY-MM-DD"), todos.sort(this._sortTodo)).write();
+    todos_db.set(moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD"), todos.sort(this._sortTodo)).write();
 
     // if set host, sync with server side
     if (this.options.host) {
@@ -201,9 +204,12 @@ module.exports = class GTD {
         json: true,
         body: parsedItem
       }).then(data => {
-        this._printTodos([data]);
+        // this._printTodos([data]);
       });
     }
+
+    // show current list of todo ?
+    // this.show();
   }
 
   _sortTodo(a, b) {
@@ -238,21 +244,54 @@ module.exports = class GTD {
    * @param date 
    */
   show(date = moment()) {
-    if (this.syncing) return setTimeout(this.show.bind(this), 200);
+    if (this.syncing) return setTimeout(this.show.bind(this, date), 200);
+    let todos = this._fetch(date);
+    if (todos.length) this._printTodos(todos);
+    else console.info(chalk.yellow("No Todos Found!"));
+  }
+
+  _fetch(date = moment()) {
     date = moment(date);
     let dateStr = moment(date).format("YYYY-MM-DD");
-    this._printTodos(db.get("todos")
+    let todos = db.get("todos")
         .defaults({[dateStr]: []})
         .get(dateStr)
-        .value());
+        .filter(item => item.status != STATUS.deleted)
+        .value();
+    if (!todos.length && this.retry++ < this.MAX_RETRY) return this._fetch(date.add(1, "d"));
+    return todos;
   }
 
   /**
    * mark an item as done
    * @param item 
    */
-  done(item) {
+  done(idx, date) {
+    this._update(idx, STATUS.done, date);
+  }
 
+  fail(idx, date) {
+    this._update(idx, STATUS.fail, date);
+  }
+
+  undo(idx, date) {
+    this._update(idx, STATUS.ongoing, date);
+  }
+
+  remove(idx, date) {
+    this._update(idx, STATUS.deleted, date);
+  }
+
+  _update(idx, status, date = moment()) {
+    let todos = this._fetch(date);
+    if (todos[idx - 1]) {
+      db.get("todos").get(moment(date).format("YYYY-MM-DD")).find({_item: todos[idx - 1]._item}).assign({status, updated: moment()}).write();
+    } else {
+      console.warn(chalk.yellow("Idx out of range!"));
+    }
+
+    // show updated items
+    this.show(date);
   }
 
   /**
@@ -265,17 +304,17 @@ module.exports = class GTD {
 
       // unlikely happen, but just for safety
       if (!item) return;
-      item = chalk.green(`    ${i + 1}. [ ${todo.status === "done" ? "x" : ""} ] ${item.replace(this.placeRegex, match => chalk.yellow(match))
+      item = `[ ${todo.status === STATUS.done ? "x" : todo.status === STATUS.fail ? "-" : " "} ] ${item.replace(this.placeRegex, match => chalk.yellow(match))
                   .replace(this.timeRegex, match => chalk.cyan(match))
-                  .replace(this.timeRegexPlus, match => chalk.cyan(match))}`);
+                  .replace(this.timeRegexPlus, match => chalk.cyan(match))}`;
 
       // add a strikehtrough for done item
-      if (todo.status === "done") item = chalk.strikethrough(item);
+      if (todo.status === STATUS.done) item = chalk.strikethrough.dim(item);
 
       // red bg for failed item
-      if (todo.status === "fail") item = chalk.bgRed.italic(item);
+      if (todo.status === STATUS.fail) item = chalk.bold.italic(item);
 
-      return `${item}`;
+      return "    " + chalk.green(`${i + 1}. ${item}`);
     });
 
     console.log(todosPretty.join("\n"));
@@ -285,7 +324,7 @@ module.exports = class GTD {
     // TODO: walk through char by char
     if (!item) return;
     item = item.replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ");
-    let parsedItem : LooseObject = { _item: item, status: Status.ongoing};
+    let parsedItem : LooseObject = { _item: item, status: STATUS.ongoing};
     
     // parse the body
     // remove the time, place, heading or trailing spaces, multiple spaces into one space

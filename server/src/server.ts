@@ -13,19 +13,19 @@ const sortTodo = (a, b) => a.created - b.created;
 
 const addItemToDB = (item, i, array) => {
   let todos = db.get("todos");
-  let local_todos = todos.defaults({[moment(item.created).format("YYYY-MM-DD")]: []})
-    .get(moment(item.created).format("YYYY-MM-DD")).value();
+  let local_todos = todos.defaults({[moment(item.begin || item.created).format("YYYY-MM-DD")]: []})
+    .get(moment(item.begin || item.created).format("YYYY-MM-DD")).value();
   
     local_todos.push(item);
 
   // sort
-  todos.set(moment(item.created).format("YYYY-MM-DD"),
+  todos.set(moment(item.begin || item.created).format("YYYY-MM-DD"),
             local_todos.sort(sortTodo)).write();
 };
 
 const updateItemToDB = (item, i, array) => {
-  // fidn and update
-  db.get("todos").get(moment(item.created).format("YYYY-MM-DD")).find({_item: item._item}).assign(item).write();
+  // find and update
+  db.get("todos").get(moment(item.begin || item.created).format("YYYY-MM-DD")).find({_item: item._item}).assign(item).write();
 }
 
 db.defaults({ todos: {} })
@@ -67,12 +67,12 @@ app.get("/todos/:date", (req, res) => {
 
 app.post("/", (req, res) => {
   db.get("todos")
-    .defaults({[moment(req.body.created).format("YYYY-MM-DD")]: []})
-    .get(moment(req.body.created).format("YYYY-MM-DD"))
+    .defaults({[moment(req.body.begin || req.body.created).format("YYYY-MM-DD")]: []})
+    .get(moment(req.body.begin || req.body.created).format("YYYY-MM-DD"))
     .push(req.body)
     .write();
 
-  res.json(Object.assign({id: db.get("todos." + moment(req.body.created).format("YYYY-MM-DD")).value().length}, req.body));
+  res.json(Object.assign({id: db.get("todos." + moment(req.body.begin || req.body.created).format("YYYY-MM-DD")).value().length}, req.body));
 });
  
 app.listen(2000);

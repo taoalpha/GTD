@@ -9,16 +9,16 @@ var db = low(adapter);
 var sortTodo = function (a, b) { return a.created - b.created; };
 var addItemToDB = function (item, i, array) {
     var todos = db.get("todos");
-    var local_todos = todos.defaults((_a = {}, _a[moment(item.created).format("YYYY-MM-DD")] = [], _a))
-        .get(moment(item.created).format("YYYY-MM-DD")).value();
+    var local_todos = todos.defaults((_a = {}, _a[moment(item.begin || item.created).format("YYYY-MM-DD")] = [], _a))
+        .get(moment(item.begin || item.created).format("YYYY-MM-DD")).value();
     local_todos.push(item);
     // sort
-    todos.set(moment(item.created).format("YYYY-MM-DD"), local_todos.sort(sortTodo)).write();
+    todos.set(moment(item.begin || item.created).format("YYYY-MM-DD"), local_todos.sort(sortTodo)).write();
     var _a;
 };
 var updateItemToDB = function (item, i, array) {
-    // fidn and update
-    db.get("todos").get(moment(item.created).format("YYYY-MM-DD")).find({ _item: item._item }).assign(item).write();
+    // find and update
+    db.get("todos").get(moment(item.begin || item.created).format("YYYY-MM-DD")).find({ _item: item._item }).assign(item).write();
 };
 db.defaults({ todos: {} })
     .write();
@@ -53,11 +53,11 @@ app.get("/todos/:date", function (req, res) {
 });
 app.post("/", function (req, res) {
     db.get("todos")
-        .defaults((_a = {}, _a[moment(req.body.created).format("YYYY-MM-DD")] = [], _a))
-        .get(moment(req.body.created).format("YYYY-MM-DD"))
+        .defaults((_a = {}, _a[moment(req.body.begin || req.body.created).format("YYYY-MM-DD")] = [], _a))
+        .get(moment(req.body.begin || req.body.created).format("YYYY-MM-DD"))
         .push(req.body)
         .write();
-    res.json(Object.assign({ id: db.get("todos." + moment(req.body.created).format("YYYY-MM-DD")).value().length }, req.body));
+    res.json(Object.assign({ id: db.get("todos." + moment(req.body.begin || req.body.created).format("YYYY-MM-DD")).value().length }, req.body));
     var _a;
 });
 app.listen(2000);
