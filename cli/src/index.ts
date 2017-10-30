@@ -7,6 +7,10 @@ declare interface ObjectConstructor {
   assign(target: any, ...sources: any[]): any;
 }
 
+interface ObjectConstructor {
+  assign(target: any, ...sources: any[]): any;
+}
+
 enum STATUS {
   ongoing = "ongoing",
   fail = "fail",
@@ -61,9 +65,6 @@ module.exports = class GTD {
     } catch (e) {};
 
     this._updateConfig();
-
-    // TODO: put sync to background process with `forever`
-    this._sync();
   }
 
   _updateConfig() {
@@ -188,13 +189,13 @@ module.exports = class GTD {
     let parsedItem = this._parse(item);
 
     let todos_db = db.get("todos")
-      .defaults({ [moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD")]: [] });
+      .defaults({ [parsedItem.dateKey]: [] });
 
-    let todos = todos_db.get(moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD")).value();
+    let todos = todos_db.get(parsedItem.dateKey).value();
     todos.push(parsedItem);
 
     // store sorted items
-    todos_db.set(moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD"), todos.sort(this._sortTodo)).write();
+    todos_db.set(parsedItem.dateKey, todos.sort(this._sortTodo)).write();
 
     // if set host, sync with server side
     if (this.options.host) {
@@ -230,8 +231,8 @@ module.exports = class GTD {
 
     fs.writeFileSync(path.join(__dirname, "configs"), JSON.stringify(this.options));
 
-
     this._updateConfig();
+    this._sync();
   }
 
   // support actions
@@ -244,6 +245,7 @@ module.exports = class GTD {
    * @param date 
    */
   show(date = moment()) {
+    this._sync();
     if (this.syncing) return setTimeout(this.show.bind(this, date), 200);
     let todos = this._fetch(date);
     if (todos.length) this._printTodos(todos);
@@ -325,7 +327,7 @@ module.exports = class GTD {
     if (!item) return;
     item = item.replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ");
     let parsedItem : LooseObject = { _item: item, status: STATUS.ongoing};
-    
+
     // parse the body
     // remove the time, place, heading or trailing spaces, multiple spaces into one space
     parsedItem.title = item.replace(this.timeRegex, "").replace(this.timeRegexPlus, "").replace(this.placeRegex, "");
@@ -370,6 +372,8 @@ module.exports = class GTD {
       parsedItem.begin = parsedItem.begin.add(1, "d");
       parsedItem.end = parsedItem.end.add(1, "d");
     }
+
+    parsedItem.dateKey = moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD");
 
     return parsedItem;
   }

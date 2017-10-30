@@ -41,8 +41,6 @@ module.exports = /** @class */ (function () {
         catch (e) { }
         ;
         this._updateConfig();
-        // TODO: put sync to background process with `forever`
-        this._sync();
     }
     GTD.prototype._updateConfig = function () {
         this.apiUrl = (this.options.host.slice(0, 4) === "http" ? this.options.host : "http://" + this.options.host) + ":" + (this.options.port || 80);
@@ -163,11 +161,11 @@ module.exports = /** @class */ (function () {
         if (item === void 0) { item = ""; }
         var parsedItem = this._parse(item);
         var todos_db = db.get("todos")
-            .defaults((_a = {}, _a[moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD")] = [], _a));
-        var todos = todos_db.get(moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD")).value();
+            .defaults((_a = {}, _a[parsedItem.dateKey] = [], _a));
+        var todos = todos_db.get(parsedItem.dateKey).value();
         todos.push(parsedItem);
         // store sorted items
-        todos_db.set(moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD"), todos.sort(this._sortTodo)).write();
+        todos_db.set(parsedItem.dateKey, todos.sort(this._sortTodo)).write();
         // if set host, sync with server side
         if (this.options.host) {
             rp({
@@ -201,6 +199,7 @@ module.exports = /** @class */ (function () {
         });
         fs.writeFileSync(path.join(__dirname, "configs"), JSON.stringify(this.options));
         this._updateConfig();
+        this._sync();
     };
     // support actions
     GTD.prototype.hasAction = function (action) {
@@ -212,6 +211,7 @@ module.exports = /** @class */ (function () {
      */
     GTD.prototype.show = function (date) {
         if (date === void 0) { date = moment(); }
+        this._sync();
         if (this.syncing)
             return setTimeout(this.show.bind(this, date), 200);
         var todos = this._fetch(date);
@@ -335,6 +335,7 @@ module.exports = /** @class */ (function () {
             parsedItem.begin = parsedItem.begin.add(1, "d");
             parsedItem.end = parsedItem.end.add(1, "d");
         }
+        parsedItem.dateKey = moment(parsedItem.begin || parsedItem.created).format("YYYY-MM-DD");
         return parsedItem;
     };
     GTD.prototype._parsePlace = function (item) {

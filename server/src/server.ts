@@ -1,5 +1,10 @@
 declare const require;
 declare const __dirname;
+
+interface ObjectConstructor {
+  assign(target: any, ...sources: any[]): any;
+}
+
 const app = require('express')();
 const bodyParser = require("body-parser");
 const moment = require("moment");
@@ -13,19 +18,19 @@ const sortTodo = (a, b) => a.created - b.created;
 
 const addItemToDB = (item, i, array) => {
   let todos = db.get("todos");
-  let local_todos = todos.defaults({[moment(item.begin || item.created).format("YYYY-MM-DD")]: []})
-    .get(moment(item.begin || item.created).format("YYYY-MM-DD")).value();
+  let local_todos = todos.defaults({[item.dateKey]: []})
+    .get(item.dateKey).value();
   
     local_todos.push(item);
 
   // sort
-  todos.set(moment(item.begin || item.created).format("YYYY-MM-DD"),
+  todos.set(item.dateKey,
             local_todos.sort(sortTodo)).write();
 };
 
 const updateItemToDB = (item, i, array) => {
   // find and update
-  db.get("todos").get(moment(item.begin || item.created).format("YYYY-MM-DD")).find({_item: item._item}).assign(item).write();
+  db.get("todos").get(item.dateKey).find({_item: item._item}).assign(item).write();
 }
 
 db.defaults({ todos: {} })
@@ -67,12 +72,12 @@ app.get("/todos/:date", (req, res) => {
 
 app.post("/", (req, res) => {
   db.get("todos")
-    .defaults({[moment(req.body.begin || req.body.created).format("YYYY-MM-DD")]: []})
-    .get(moment(req.body.begin || req.body.created).format("YYYY-MM-DD"))
+    .defaults({[req.body.dateKey]: []})
+    .get(req.body.dateKey)
     .push(req.body)
     .write();
 
-  res.json(Object.assign({id: db.get("todos." + moment(req.body.begin || req.body.created).format("YYYY-MM-DD")).value().length}, req.body));
+  res.json(Object.assign({id: db.get("todos." + req.body.dateKey).value().length}, req.body));
 });
  
 app.listen(2000);

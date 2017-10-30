@@ -5,13 +5,15 @@ let node;
 module.exports = function() {
   this.gulp.task("server-restart", done => {
     if (node) node.kill();
-    node = spawn("npm", ["run", "server"], {stdio: "inherit"})
-    node.on("close", function (code) {
-      if (code === 8) {
-        this.gulp.log("Error detected, waiting for changes...");
-      }
-    });
-    done();
+    setTimeout(() => {
+      node = spawn("npm", ["run", "server"], { stdio: "inherit" })
+      node.on("close", function (code) {
+        if (code === 8) {
+          this.gulp.log("Error detected, waiting for changes...");
+        }
+      });
+      done();
+    }, 1000);
   });
 };
 
